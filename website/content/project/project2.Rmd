@@ -1,0 +1,360 @@
+---
+title: "Project 2"
+author: "Jasmine Anand"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", 
+    warning = F, message = F, tidy = TRUE, tidy.opts = list(width.cutoff = 60), 
+    R.options = list(max.print = 100))
+
+library(dplyr)
+library(rstatix)
+library(plotROC)
+library(glmnet)
+library(lmtest)
+library(sandwich)
+```
+
+## Introduction
+
+##### For this project, I will be using the Titanic dataset. I am interested to see if I can see some relationship between survivial rate and other factors such as class, gender, and age.  
+
+##### This dataset has 14 variables. The variable pclass states the passenger class, which can be 1,2, or 3. The variable sibsp is the number of siblings/spouses the person on board and the variable parch is the number of parents/children on board. The variable boat states the lifeboat number of the person if they survived and body is the body number if they did not survive and the body was recovered. I will be removing boat, body, cabin, name, ticket, and home destination as they do not provide additional information about the dataset. 
+
+
+```{R}
+titanic<- read.csv("titanic.csv")
+
+titanic$pclass = as.factor(titanic$pclass)
+titanic<- titanic %>% mutate(survive = ifelse(survived==1,"True", "False"))
+titanic<- titanic %>% select(-name, -ticket, -cabin, -boat, -body, -home.dest)
+
+head(titanic)
+
+```
+
+
+
+
+## MANOVA Test
+
+#### Checking Assumptions
+```{r}
+
+group<- titanic$pclass
+DVs<- titanic %>% select(age, sibsp, parch, fare)
+sapply(split(DVs,group), mshapiro_test)
+#lapply(split(DVs,group), cov)
+#box_m(DVs, group)
+
+```
+
+*Checking Assumptions: Multivariate normality fails because all of the p-values are less than 0.05, meaning we would reject the null hypothesis of normality being met. The assumption of homogeneity of covariance is also probably not met. *
+
+```{r}
+man<- manova(cbind(age, sibsp, parch, fare)~pclass, data = titanic)
+
+summary(man)
+```
+
+*Manova results: Null hypothesis is that for age, sibsp, parch, and fare, means for survived and not survivedfor the different passanger classes are equal. Alternative hypothesis is that for at least one dependent variable, at least one passanger class mean is different. According to the results of the MANOVA, we would reject the null hypothesis, meaning that at least there is a mean difference in at least one of the dependent variables for at least one of the passenger class (F=83.192, df= 2,8, p<0.05)*
+
+```{r}
+summary.aov(man)
+
+```
+
+*Univariate ANOVA results: According to the univariate ANOVA test, only two of the dependent variables resulted in a significant difference. These were age of the passenger and fare (ticket cost)*
+
+```{r}
+pairwise.t.test(titanic$fare, titanic$pclass, p.adj="none")
+
+pairwise.t.test(titanic$age, titanic$pclass, p.adj="none")
+
+```
+
+*Post-hoc t-test results: Without any adjustment to the p-value (p=0.05), all combinations are significant for both age and fare. This means that for both age and fare, there was significant different in the group means for all of the passenger classes.*
+
+```{r}
+type1<- 1 - (0.95**11)
+type1 #probability of type 1 error
+```
+
+*Number of tests: 1 manova, 4 anova, and 6 t-test, resulting in a total of 11 tests. Probability of type 1 error: 43.1% . Adjusted significance level: 0.00455. Given this new adjusted p-value, there is only one change in the results. All of the t-tests are significant except for between second and third class for the fare. This means that there is not a significant difference in mean fare for second class and third class. This result is pretty interesting, and I am curious if there is difference in survival rate between these two classes.*
+
+
+## Randomization Test- Is there a difference in the mean fare for females and males. 
+```{r}
+
+rand_dist<- vector()
+
+
+for(i in 1:5000){
+  new<-data.frame(fare=sample(titanic$fare),sex=titanic$sex)
+  rand_dist[i]<-mean(new[new$sex=="female",]$fare, na.rm=T)-mean(new[new$sex=="male",]$fare, na.rm=T)
+}
+
+act_diff<- mean(titanic[titanic$sex=="female",]$fare, na.rm=T)-mean(titanic[titanic$sex=="male",]$fare, na.rm=T)
+act_diff
+
+
+
+{hist(rand_dist, main="Randomization Test Null Distribution", ylab="frequency"); abline(v = c(-act_diff, act_diff), col="red") }
+
+mean(rand_dist>act_diff | rand_dist < -act_diff)
+
+```
+
+*Ho: Mean fare of the ticket is the same for males vs. females. Ha: Mean fare of the ticket is different for males vs. females. We would reject the null hypothesis, meaning that there is a difference in mean fare for females vs males. The probability through this randomization test was actually 0. You can see this in the histogram, as the vertical lines for where the actual mean difference should be at don't show up. *
+
+
+
+## Linear Regression 
+
+#### Checking Assumptions
+
+```{r}
+titanic$age_c <- titanic$age - mean(titanic$age, na.rm=T)
+lin_fit <- lm(fare~age_c*survive, data=titanic)
+resids<- lin_fit$residuals
+fitted<- lin_fit$fitted.values
+
+ggplot()+geom_point(aes(fitted, resids)) +geom_hline(yintercept = 0, color='red') + ggtitle("Testing Linearity and Homoskedsaticity")
+
+#formal test for normality:
+
+ks.test(resids, "pnorm", mean=0, sd(resids))
+
+
+```
+
+*From the residuals and fitted values plot, we can see that it does not pass the linearity or homoskedsaticity assumptions. From the Kolmogorov=Smirnov test, we would reject the null hypothesis of normal distribution. Therefore, our data also fails the normality assumption*
+
+
+#### Running Model
+
+
+```{r}
+summary(lin_fit)
+```
+
+*Interpretation of the coefficients: $24.83 is the mean fare for those who did not survive with an average age. For those who did not survive, fare increases $0.51 for every increase in age. The fare is about $29.55 more for does who survived with average age compared with those who did not survive. Lastly, slope of age on fare for those who did not survive is 0.5252 greater than the slope for who survived*
+
+*About 0.1011 proportion of the variation in the outcome is explained by this model*
+
+```{r}
+coeftest(lin_fit, vcov=vcovHC(lin_fit))
+```
+
+*When the regression is recomputed with the robust standard errors, there is not much change in the results from before and after the robust standard errors were applied. The intercept and all of the coefficient values are all still significant. However, the interaction p-value after the robust SEs became very close to not being significant.* 
+
+```{r}
+titanic %>% ggplot(aes(x=age_c, y=fare, color= survive)) + geom_point() + geom_smooth(method="lm", se=F, fullrange=T)
+```
+
+
+
+## Linear Regression with Bootstrapped SE
+```{r}
+
+samp_distn<- replicate(5000, { 
+  boot_dat <- sample_frac(titanic, replace=T) #take bootstrap sample of rows  
+  fit <- lm(fare~age_c*survive, data=boot_dat) #fit model on bootstrap sample  
+  coef(fit) #save coefs
+  }) 
+
+samp_distn  %>% t %>% as.data.frame() %>% summarise_all(sd)
+
+samp_distn%>%t%>%as.data.frame%>%gather%>%group_by(key)%>% summarize(lower=quantile(value,.025), upper=quantile(value,.975))
+
+```
+
+*The coefficients for intercept, age_c, surviveTrue, and the interaction all lie outside the 95% confidence interval, meaning they would all reject the null hypothesis (i.e. is significant). This is the same result as above without the bootstrapped SE.*
+
+
+```{r}
+class_diag <- function(probs,truth){
+  #CONFUSION MATRIX: CALCULATE ACCURACY, TPR, TNR, PPV
+  
+  if(is.character(truth)==TRUE) truth<-as.factor(truth)
+  if(is.numeric(truth)==FALSE & is.logical(truth)==FALSE) truth<-as.numeric(truth)-1
+  
+  tab<-table(factor(probs>.5,levels=c("FALSE","TRUE")),factor(truth, levels=c(0,1)))
+  acc=sum(diag(tab))/sum(tab)
+  sens=tab[2,2]/colSums(tab)[2]
+  spec=tab[1,1]/colSums(tab)[1]
+  ppv=tab[2,2]/rowSums(tab)[2]
+  
+  #CALCULATE EXACT AUC
+  ord<-order(probs, decreasing=TRUE)
+  probs <- probs[ord]; truth <- truth[ord]
+  
+  TPR=cumsum(truth)/max(1,sum(truth)) 
+  FPR=cumsum(!truth)/max(1,sum(!truth))
+  
+  dup <-c(probs[-1]>=probs[-length(probs)], FALSE)
+  TPR <-c(0,TPR[!dup],1); FPR<-c(0,FPR[!dup],1)
+  n <- length(TPR)
+  auc <- sum( ((TPR[-1]+TPR[-n])/2) * (FPR[-1]-FPR[-n]) )
+
+  data.frame(acc,sens,spec,ppv,auc)
+}
+```
+
+## Logistic Regression - 2 variables
+```{r}
+
+#remove age values that are na
+log_dat <- titanic %>% select(survived, sex, age_c, survive) %>% filter(!is.na(age_c))
+
+
+log_fit <- glm(survived~ sex+age_c, data = log_dat, family="binomial")
+summary(log_fit)
+
+
+```
+
+*Interpretation of the Coefficients: A female with average age has an odds of surviving of 3.029 (e^1.108292). For a Female, every unit increase in age from the average age multiplies the odds of survival by 0.9958 (basically does not really change for female). The odds of survival of a Male with average age  0.0854 times the odds for a average age Female.*
+
+```{r}
+probs<- predict(log_fit, newdata = log_dat, type="response")
+
+
+table(predict = as.numeric(probs > 0.5), truth = log_dat$survived) %>% 
+    addmargins
+
+class_diag(probs, log_dat$survived)
+
+```
+
+
+*The accuracy of my model is 0.7791, which means my model was able to correctly predict around 78% of the time. My sensitivity/TPR was 0.6838 meaning that if a person had survived, this model will correctly predict that 68.4% of the time. The specificity of the model was 0.8449 meaning it was able to predict non-survivors as such 84.5% of the time. The precision was 0.7526 which the out of those that were predicted to have survived, 75.3% of those did actually survive. Lastly, the AUC of this model was 0.7735 which means that our model is Fair at predicting values.*
+
+```{r}
+log_dat$probs_log <- predict(log_fit, newdata = log_dat, type = "link")
+
+
+log_dat %>% ggplot()+geom_density(aes(probs_log,color=survive,fill=survive), alpha=.4)+
+  theme(legend.position=c(.85,.85))+geom_vline(xintercept=0)+xlab("logit (log-odds)")+
+  geom_rug(aes(probs_log,color=survive)) 
+
+m_val<- log_dat %>% select(age_c, sex)
+
+ROCplot<- ggplot() + geom_roc(aes(d=log_dat$survived, m=probs), n.cuts=0) + ggtitle("ROC Curve")
+ROCplot
+calc_auc(ROCplot)
+```
+
+*The AUC calculated from the ROC curve is 0.7735 which is exactly the same as that calculated above.*
+
+## Logistic Regression - all variables
+```{r}
+
+log_dat<- titanic %>% select(-age_c, -survive) %>%  na.omit() #remove the redundant columns and na
+
+
+fit<- glm(survived~ ., data = log_dat, family="binomial")
+
+probs <- predict(fit, newdata = log_dat, type="response")
+class_diag(probs, log_dat$survived)
+
+table(predict = as.numeric(probs > 0.5), truth = log_dat$survived) %>% 
+    addmargins
+
+```
+
+*The AUC of this model is 0.8515 which makes this a good model. The other metrics like accurace and specificity are also pretty good for this model.*
+
+```{r}
+k=10
+cvdata<- log_dat[sample(nrow(log_dat)), ]
+folds<- cut(seq(1:nrow(log_dat)), breaks = k, labels = F)
+diags<- NULL
+
+for (i in 1:k) {
+    # FOR EACH OF 10 FOLDS
+    train <- cvdata[folds != i, ]  # CREATE TRAINING SET
+    test <- cvdata[folds == i, ]  # CREATE TESTING SET
+    
+    truth <- test$survived
+    
+    fit <- glm(survived ~ ., data = train, family = "binomial")
+    probs <- predict(fit, newdata = test)
+    
+    diags <- rbind(diags, class_diag(probs, truth))  #CV DIAGNOSTICS FOR EACH FOLD
+}
+
+summarize_all(diags, mean)  #AVERAGE THE DIAGNOSTICS ACROSS THE 10 FOLDS
+
+
+
+```
+
+*The AUC obtained from the cross-validation is 0.8457 which is really close to the AUC obtained from the model trained on the whole data- about a 0.01 difference. This means that the model trained on the whole data was actually a pretty reliable model as it did not overfit (or underfit) the data points. *
+
+```{r}
+
+predictors <- model.matrix(survived ~ ., data = log_dat)
+predictors <- predictors[, -1]
+response<- log_dat$survived
+cv <- cv.glmnet(predictors, response, family = "binomial")
+lasso <- glmnet(predictors, response, family = "binomial", lambda = cv$lambda.1se)
+coef(lasso)
+
+```
+
+*All of the variable except for parch (number of parents and children) and those embarked in Southhampton (S) were retained *
+
+```{r}
+
+lasso_dat<- log_dat %>% mutate(C = ifelse(embarked=="C", 1, 0)) %>% mutate(Q = ifelse(embarked=="Q", 1,0)) %>% select(-embarked, -parch)
+
+k=10
+cvdata<- lasso_dat[sample(nrow(lasso_dat)), ]
+folds<- cut(seq(1:nrow(lasso_dat)), breaks = k, labels = F)
+diags<- NULL
+
+for (i in 1:k) {
+    # FOR EACH OF 10 FOLDS
+    train <- cvdata[folds != i, ]  # CREATE TRAINING SET
+    test <- cvdata[folds == i, ]  # CREATE TESTING SET
+    
+    truth <- test$survived
+    
+    fit <- glm(survived ~ ., data = train, family = "binomial")
+    probs <- predict(fit, newdata = test)
+    
+    diags <- rbind(diags, class_diag(probs, truth))  #CV DIAGNOSTICS FOR EACH FOLD
+}
+
+summarize_all(diags, mean)  #AVERAGE THE DIAGNOSTICS ACROSS THE 10 FOLDS
+
+
+```
+
+*The AUC for the 10-fold cross-validation with lasso selected variables is 0.8454. This very similar to AUC obtained from the cross-validation of all the variable- a difference of about 0.003, with the lasso cross validation having the lower AUC.  *
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

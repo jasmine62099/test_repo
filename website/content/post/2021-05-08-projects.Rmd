@@ -1,0 +1,22 @@
++++
+title = "projects"
+description = ""
+tags = []
+categories = []
++++
+
+[Link to project 1](/project/project1/)
+
+[Link to google](https://www.google.com)
+
+```{r}
+
+```
+
+
+
+```{python3}
+```
+
+
+

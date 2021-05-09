@@ -1,0 +1,295 @@
+---
+title: "Project 1"
+author: "Jasmine Anand"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", 
+    warning = F, message = F, tidy = TRUE, tidy.opts = list(width.cutoff = 60), 
+    R.options = list(max.print = 100))
+```
+
+## Introduction
+
+##### I decided to work with two Marvel datasets because I am a huge Marvel fan. I have watched all the Marvel movies at least 3 times and have also  read a lot of the Marvel comic books. Through this projct I wanted to see if I can find any associations through the datasets I have chosen. For this Project, I will be analyzing 2 different Marvel datasets. The first dataset, called stats,  has information on abilities of each of the Marvel Characters, such as intelligence, strength, power, and speed. Most of these abilities range from 1 to 100, except for Intelligence and Durability. There is a Total column in this dataset, which adds up all of the values from the other numerical columns. This dataset also contains information on whether or not the character is good or bad. The second dataset, called character_info, contains information on physical attributes of the Marvel Characters, such as eye color, race, gender, hair color, height, and weight. The height is in centimeters and weight is in kilograms. This dataset also contains whether the character is bad or good. I found both of these datasets while doing a google search on marvel datasets. These were both found on a website called kaggle and the owner of these datasets is Daniel R. I do not know what to expect from this dataset. I hope there will be some relationship between a character's alignment (good or bad) and their other characteristics like power, speed, height, weight, etc. 
+
+
+
+```{r}
+library(tidyverse)
+library(dplyr)
+
+stats <- read.csv("charcters_stats.csv")
+character_info <- read.csv("marvel_characters_info.csv")
+
+glimpse(stats)
+glimpse(character_info)
+```
+
+## Tidying the data!
+
+
+#### Looking through both of the datasets, I saw that the stat dataset looked complete but the character_info dataset required a little bit of cleaning. For instance, I am going to remove the skin color column because there were a lot of missing values in that column. I am also saw that Height and Weight had some values of -99, which most likely represent missing data. For these values, I am just going to omit them from the dataset.
+
+```{r}
+
+character_info<- character_info %>% select(-SkinColor) %>% filter(Height!=-99) %>% filter(Weight!=-99)
+
+```
+
+
+
+
+##### Since both of the datasets are already tidy, I will make them untidy with a pivot_longer and then tidy them back up with pivot_wider. I did this with the character_info dataset. I am first doing a pivot_longer on the columns that represent some sort of color, such as eye colore, hair color, and skin color. Then I am going to do a pivot wider on the newly created column, named "Body_part", to tidy the dataset again. 
+
+
+```{r}
+
+character_info <- character_info %>% pivot_longer(contains("Color"), names_to="Body_part", values_to = "Color")
+
+head(character_info, 10) #untidy
+
+
+```
+
+##### The following pivot_wider will tidy back the dataset, so that it looks like the original. 
+
+```{r}
+
+character_info <- character_info %>% pivot_wider(names_from = "Body_part", values_from= "Color") #tidy
+head(character_info, 10)
+
+```
+
+## Joining the datasets!
+
+##### I will be doing an inner join on these two datasets. I want to only keep the characters that are common between the two datasets because I want each character to have all the attribute information. Doing any other join, such as a full join or left join, would have left me with characters with missing information. Before joining the datasets, I removed the Alignment column from the character_info dataset because there was an Alignment column in the stats dataset, and this would give us duplicate information. I also removed the character ID as it does not give us any relevant information about the character. 
+
+
+```{r}
+
+character_info<- character_info %>% select(-Alignment, -ID)
+character <- inner_join(character_info, stats, by="Name")
+character<- character %>% distinct_at(vars(Name), .keep_all = TRUE)
+
+dim(stats)
+dim(character_info)
+dim(character)
+glimpse(character)
+
+```
+
+#### The character_info dataset had 409 observations/characters, while the stats dataset had 611 observations. Since the resulting joined table contained 490 observations, there had to be some observations that were dropped from both datasets. Also, after combining the two datasets, I removed all of the names that were duplicate and that got rid of some of the observations as well. These are the observations dropped from the stats dataset:
+
+```{r}
+setdiff(stats$Name, character$Name)
+```
+
+#### These are the observations dropped from the character_info dataset
+```{r}
+setdiff(character_info$Name, character$Name)
+```
+## Wrangling!
+
+### Using all 6 core dplyr functions
+
+##### Grabbing all of the females and sorting them based on Power and Intelligence
+```{r}
+
+character %>% filter(Gender == "Female") %>% arrange(desc(Power), desc(Intelligence)) %>% select(Name, Gender, Power, Intelligence)
+
+```
+*With this, I wanted to see which Female Marvel Characters had the highest intelligence and Power. From this, it can be seen that Jean Grey and Phoenix have the higher power and intelligence. Jean Grey and Phoenix are actually the same people (Phoenix is Jean Grey's alias). Based on the movies and comic books I have read, I can definitely see Jean Grey having the most power out of all the Marvel females.*
+
+#### Creating a new column BMI and then classifying their BMI
+```{r}
+character <- character %>% mutate(BMI = Weight/ ((Height/100)**2))
+character %>% select(Name, Height, Weight, BMI) %>% arrange(BMI)
+
+character <- character %>% mutate(BMI_class = case_when(
+  BMI<18.5 ~ "Underweight",
+  BMI<24.9 ~ "Normal",
+  BMI<29.9 ~ "Overweight",
+  BMI>=30 ~ "Obese"
+))
+
+character %>% select(Name, Height, Weight, BMI_class)
+
+```
+
+*Through this, I created a column for BMI and BMI class (based on BMI). While looking through the data, I saw that there were some character who had a very large weight or height and wanted to see how their BMI classified them. Looking at some of the values for height and weight, there seems to be some error in the dataset. For, instance Groot, the character with the lowest BMI, has a height of 701 cm, but his weight is only 4 kg.*
+
+
+#### Determining the average Intelligence, Strength, Speed, and Power of characters based on their comic book publisher 
+```{r}
+
+character %>% group_by(Publisher) %>% summarise(mean_intelligence = mean(Intelligence), mean_strength = mean(Strength), mean_speed =mean(Speed), mean_power= mean(Power)) %>% arrange(mean_intelligence, mean_strength, mean_speed, mean_power)
+
+```
+*I was not expecting to see any association between comic book publisher and the characters intelligence, strength, speed, and power. At a glance, Image Comics seems to produce most intelligent characters, Shueisha produces the speediest and strongest characters, and Image Comics and Shueisha are tied for powerful characters.*
+
+
+### Creating summary statistics
+
+##### In this, I will determine the mean, stadard deviation, maximum, minimum, and variance of each of the numeric values in the joined dataset. I will be using pivot_longer, separate, and pivot_wider to create my summary statistic table
+
+```{r}
+summary_table <- character %>% select_if(is.numeric) %>% summarise_all(funs(mean,sd,max,min, var))
+summary_table <- summary_table %>% pivot_longer(1:length(summary_table), names_to = "name", values_to= "value") %>% separate(name, into=c("numeric", "statistic")) %>% pivot_wider(names_from = "statistic", values_from="value")
+summary_table %>% arrange(mean)
+
+```
+*In order to tidy this summary table, I first did a pivot_longer, which caused all of the summary stat names to be in one column in this format type_stat (ex. "height_mean"). I did a separate to separate the type and stat type into two columns. Lastly, I did a pivot wider to get all the stats to be column names. There is nothing that interesting from this table.*
+
+
+#### Here I am going to group by Gender and Alignment and get the mean of the Height, Weight, Intelligence, Strength, and Total. 
+```{r}
+character %>% group_by(Gender, Alignment) %>% summarise(mean(Intelligence), mean(Strength), mean_total = mean(Total), n()) %>% arrange (mean_total)
+
+
+```
+
+
+#### I am going to group by Race and determine the proportion of the group that is good
+```{r}
+
+race_good<- character %>% group_by(Race) %>% summarise(proportion_good = mean(Alignment=="good"), count =n())
+
+race_good 
+
+race_good %>% filter(proportion_good==min(proportion_good))
+race_good %>% filter(proportion_good == max(proportion_good))
+
+```
+*The purpose of this was to determine what proportion of a ace was classified as good. I also put the count of each race so that we would know how many characters represent that Race. A lot of the Races classified as all good (1) or all bad (0), seem to have very few people in their group.*
+
+#### I am going to group by Gender and get the number in each gender
+```{r}
+character %>% group_by(Gender) %>% summarise(n())
+```
+*I am not that surprised from these results. I expected there to be much more males characters than female characters in the Marvel Universe.*
+
+## Visualizations
+
+### Correlation Heat Map
+```{r}
+
+cor_characters <- character %>% select_if(is.numeric) %>% cor(use = "pair")
+cor_characters<- cor_characters %>% as.data.frame %>% rownames_to_column("var1") %>%  pivot_longer(-1,names_to="var2",values_to="correlation")
+
+cor_characters %>% ggplot(aes(var1, var2, fill=correlation)) + geom_tile() + geom_text(aes(label=round(correlation,2)),color = "black", size = 4)+ theme(axis.text.x = element_text(angle = 90, hjust=1)) + coord_fixed() + scale_fill_gradient2(low="red", mid="white", high="blue")
+
+
+```
+*The strongest relationships seem to be between Total column and all of the things that add up to make the total column (such as Combat, Durability, Height, Intelligence, Power, Speed, and Strength) which makes sense. Another thing that is interesting is the BMI seems to have a very low and even negative correlation (with Speed and Height) with all of the character statististics. BMI's negative relationship with Height makes sense though because of the way BMI is calculated. This is also seen with Height and Weight.*
+
+#### Determining how weights differ in each of the different Races.
+
+```{r}
+
+character %>% ggplot(aes(Race, Weight, fill= Total)) + geom_bar(stat= "summary", fun=mean) +theme(axis.text.x = element_text(angle = 90, hjust=1)) + scale_y_continuous(breaks= seq(-100,500,50)) + ggtitle("Relationship between the different Races and the Average Weights") + ylab("Weight (kg)")
+```
+*From this graph, its seems like New God Race has the largest weight, whereas the Flora Colossus Race has the lowest weight. There also does not seem to be any significant relationship with Total, which makes sense from the correlation heat map created. *
+
+### Visualizing the Distribution of Total statistics in each of the different Alignments. 
+
+```{r}
+
+character %>% filter(Alignment!="") %>% ggplot(aes(Alignment, Total)) + geom_boxplot() + geom_jitter(alpha=0.4, aes(color=Gender)) + ggtitle("Alignment of Characters Vs. their Total statistics")
+
+```
+*The most interesting aspect of this graph is that both bad and good characters seem to have almost the same distribution, which is very surprising. I would have thought that the good characters would at least have a median total higher than that of the bad characters. Also, there does not seem to be a any relationship with Gender and Total and Alignment.*
+
+## Dimensionality Reduction - PAM clustering
+
+
+#### Process the data by chosing the numerical variables I want to analyze and scaling them
+```{r}
+library(cluster)
+
+pam_dat <- character %>% select(BMI, Intelligence, Strength, Speed, Power) %>% scale
+
+
+```
+
+#### Picking the best number of clusters:
+
+```{r}
+sil_width <- vector()
+for(i in 2:10){
+  pam_fit <- pam(pam_dat, k = i)  
+  sil_width[i] <- pam_fit$silinfo$avg.width
+  
+  
+}
+ggplot()+geom_line(aes(x=1:10,y=sil_width))+scale_x_continuous(name="k",breaks=1:10) + ggtitle("Choosing the Best K with Silhouette Method")
+```
+*Based on the average Silhouette width, the best number of cluster to choose is 2. This is because k=2, gives us the highest average silhoutte width. However, I am going to go with 3 clusters so that there are more groupings to work with.*
+
+#### Use only numerics and running cluster Analysis
+```{r}
+pam_dat <- character %>% select(BMI, Intelligence, Strength, Speed, Power) %>% scale
+pam_analysis <- pam_dat %>% pam(k=3)
+pam_analysis
+
+```
+
+#### Visualize and Interpret Clusters
+
+```{r}
+
+pam_dat<- pam_dat %>% as.data.frame()
+
+cluster_df <- pam_dat %>% mutate(cluster = as.factor(pam_analysis$clustering))
+library(GGally)
+ggpairs(cluster_df, columns = 1:5, aes(color = cluster))
+```
+
+##### Determine if clusters could be broken down into Alignment type
+
+```{r}
+character  %>% mutate (cluster = factor(pam_analysis$clustering)) %>% filter(Alignment!="") %>% group_by(cluster, Alignment) %>% summarise(n=n()) %>% mutate(prop=n/sum(n,na.rm=T)) %>% pivot_wider(-n,names_from=Alignment,values_from=prop)
+
+```
+
+*Interpretation: From both the visualization and the above matrix, there does not seem to be a great distinction between the clusters. Looking at the BMI visualization, there does not seem to be any distinct clusters- just one big blob. For the other variables there is slight clustering but they all seemed meshed together, probably giving them a low between sums of squares (BSS). The within sums of squares is also probably high because each cluster seems to be very spread out. There also does not seem to be a clear division for Alignment when looking at the proportion table. All three clusters seem to have about the same proportion of good and bad characters in it* 
+
+
+#### Discuss goodness of fit
+```{r}
+pam_analysis$silinfo$avg.width
+```
+*The average silhoutte width of this PAM analysis is around 0.41 which makes this model slightly weak. This could be because the distance between the points within each cluster is slightly high or that the distance between each cluster is low. From the visualization plots above, it seems that the between cluster distance is not the clearest. *
+
+## Conclusion
+
+##### Both marvel datasets seemed to have a lot of observations. By joining the two datasets, a lot of good information was collected. I liked seeing the correlation between the variables. But my favorite part about this project was being able to bring in my love for the Marvel Universe and seeing some of the associations I saw through my years of watching/reading Marvel. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
